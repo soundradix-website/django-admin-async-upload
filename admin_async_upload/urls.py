@@ -1,7 +1,7 @@
-from django.conf.urls import url
+from django.urls import re_path
 
 from . import views
 
 urlpatterns = [
-    url(r'^upload/$', views.admin_resumable, name='admin_resumable'),
+    re_path(r'^upload/$', views.admin_resumable, name='admin_resumable'),
 ]

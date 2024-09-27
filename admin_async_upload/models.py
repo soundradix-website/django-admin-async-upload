@@ -1,6 +1,6 @@
 from django.db import models
-from admin_async_upload.widgets import ResumableAdminWidget
-from admin_async_upload.fields import FormResumableFileField
+from .widgets import ResumableAdminWidget
+from .fields import FormResumableFileField
 
 
 class AsyncFileField(models.FileField):

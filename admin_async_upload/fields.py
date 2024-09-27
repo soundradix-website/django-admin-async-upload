@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.forms import fields
 
-from admin_async_upload.widgets import ResumableAdminWidget
+from .widgets import ResumableAdminWidget
 
 
 class FormResumableFileField(fields.FileField):
