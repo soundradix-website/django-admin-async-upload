@@ -4,7 +4,7 @@ import fnmatch
 import tempfile
 
 from django.conf import settings
-from django.core.files import File
+from django.core.files.uploadedfile import UploadedFile
 from django.core.files.storage import FileSystemStorage, default_storage
 from django.utils.module_loading import import_string
 
@@ -136,6 +136,11 @@ class ResumableFile(object):
         return size
 
     def collect(self):
-        actual_filename = self.field_storage.save(self.storage_filename, File(self.file))
+        file_data = UploadedFile(
+            self.file,
+            name=self.params.get('resumableFilename'),
+            content_type=self.params.get('resumableType', 'text/plain'),
+            size=self.params.get('resumableTotalSize', 0))
+        actual_filename = self.field_storage.save(self.storage_filename, file_data)
         self.delete_chunks()
         return actual_filename
