@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
+import os.path
 import fnmatch
 import tempfile
 
+from django.conf import settings
 from django.core.files import File
-from django.utils.functional import cached_property
-
-from .storage import ResumableStorage
+from django.core.files.storage import FileSystemStorage, default_storage
+from django.utils.module_loading import import_string
 
 
 class ResumableFile(object):
@@ -24,26 +25,22 @@ class ResumableFile(object):
         self.user = user
         self.params = params
         self.chunk_suffix = "_part_"
-
-    @cached_property
-    def resumable_storage(self):
-        return ResumableStorage()
-
-    @cached_property
-    def persistent_storage(self):
-        return self.resumable_storage.get_persistent_storage()
-
-    @cached_property
-    def chunk_storage(self):
-        return ResumableStorage().get_chunk_storage()
+        chunk_storage_class = getattr(settings, 'ADMIN_RESUMABLE_CHUNK_STORAGE', None)
+        if chunk_storage_class is None:
+            self.chunk_storage = FileSystemStorage()
+        else:
+            self.chunk_storage = import_string(chunk_storage_class)()
+        self.field_storage = self.field.storage or default_storage
 
     @property
     def storage_filename(self):
-        return self.resumable_storage.full_filename(self.filename, self.upload_to)
-
-    @property
-    def upload_to(self):
-        return self.field.upload_to
+        if isinstance(self.field.upload_to, str):
+            return self.field_storage.generate_filename(os.path.join(self.field.upload_to, self.filename))
+        else:
+            # Note that there isn't really any way to have a valid instance
+            # here so the upload file naming should not rely on it.
+            unique_name = self.field.upload_to(None, self.filename)
+            return self.field_storage.generate_filename(unique_name)
 
     @property
     def chunk_exists(self):
@@ -51,7 +48,7 @@ class ResumableFile(object):
         Checks if the requested chunk exists.
         """
         return self.chunk_storage.exists(self.current_chunk_name) and \
-               self.chunk_storage.size(self.current_chunk_name) == int(self.params.get('resumableCurrentChunkSize'))
+               self.chunk_storage.size(self.current_chunk_name) == int(self.params.get('resumableCurrentChunkSize', 0))
 
     @property
     def chunk_names(self):
@@ -139,6 +136,6 @@ class ResumableFile(object):
         return size
 
     def collect(self):
-        actual_filename = self.persistent_storage.save(self.storage_filename, File(self.file))
+        actual_filename = self.field_storage.save(self.storage_filename, File(self.file))
         self.delete_chunks()
         return actual_filename

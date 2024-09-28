@@ -6,8 +6,7 @@ from django.template import loader
 from django.templatetags.static import static
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy
-
-from .storage import ResumableStorage
+from django.core.files.storage import default_storage
 
 
 class ResumableBaseWidget(FileInput):
@@ -15,14 +14,15 @@ class ResumableBaseWidget(FileInput):
     clear_checkbox_label = gettext_lazy('Clear')
 
     def render(self, name, value, attrs=None, **kwargs):
-        persistent_storage = ResumableStorage().get_persistent_storage()
         if value:
             if isinstance(value, FieldFile):
+                field_storage = value.storage or default_storage
                 value_name = value.name
             else:
+                field_storage = default_storage
                 value_name = value
             file_name = value
-            file_url = mark_safe(persistent_storage.url(value_name))
+            file_url = mark_safe(field_storage.url(value_name))
         else:
             file_name = ""
             file_url = ""
