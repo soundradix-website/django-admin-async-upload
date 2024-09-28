@@ -1,12 +1,13 @@
 import django
-from django.conf.urls import include, url
+from django.urls import re_path
 from django.contrib import admin
 from django.conf import settings
 
+import admin_async_upload.views
 
 urlpatterns = [
-    url(r'^admin_resumable/', include('admin_async_upload.urls')),
-    url(r'^admin/', include(admin.site.urls)),
+    re_path(r'^admin_resumable/', admin_async_upload.views.admin_resumable, name="admin_resumable"),
+    re_path(r'^admin/', admin.site.urls),
 ]
 
 
