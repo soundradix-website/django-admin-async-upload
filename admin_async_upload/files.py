@@ -5,7 +5,7 @@ import tempfile
 
 from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
-from django.core.files.storage import FileSystemStorage, default_storage
+from django.core.files.storage import default_storage
 from django.utils.module_loading import import_string
 
 
@@ -27,7 +27,7 @@ class ResumableFile(object):
         self.chunk_suffix = "_part_"
         chunk_storage_class = getattr(settings, 'ADMIN_RESUMABLE_CHUNK_STORAGE', None)
         if chunk_storage_class is None:
-            self.chunk_storage = FileSystemStorage()
+            self.chunk_storage = self.field.storage or default_storage
         else:
             self.chunk_storage = import_string(chunk_storage_class)()
         self.field_storage = self.field.storage or default_storage
