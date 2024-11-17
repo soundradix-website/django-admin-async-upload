@@ -20,14 +20,20 @@ class ResumableStorage:
         Returns the chunk storage backend specified in settings.
         Defaults to the default storage if not specified.
         """
-        return storages[self.chunk_storage_key]
+        storage = storages[self.chunk_storage_key]
+        if not isinstance(storage, Storage):
+            raise ValueError(f"{self.chunk_storage_key} is not a valid Storage backend.")
+        return storage
 
     def get_persistent_storage(self, *args: Any, **kwargs: Any) -> Storage:
         """
         Returns the persistent storage backend specified in settings.
         Defaults to the default storage if not specified.
         """
-        return storages[self.persistent_storage_key]
+        storage = storages[self.persistent_storage_key]
+        if not isinstance(storage, Storage):
+            raise ValueError(f"{self.persistent_storage_key} is not a valid Storage backend.")
+        return storage
 
     def full_filename(self, filename: str, upload_to: str) -> str:
         """

@@ -2,10 +2,12 @@ import fnmatch
 import tempfile
 from typing import Any, Dict, Generator, List
 
-from admin_async_upload.storage import ResumableStorage
 from django.core.files import File
+from django.core.files.uploadedfile import UploadedFile
 from django.core.files.storage import Storage
 from django.utils.functional import cached_property
+
+from admin_async_upload.storage import ResumableStorage
 
 
 class ResumableFile:
@@ -37,18 +39,19 @@ class ResumableFile:
 
     @property
     def upload_to(self) -> str:
-        if callable(self.field.upload_to):
-            return self.field.upload_to(None, self.filename)
-        return self.field.upload_to
+        if hasattr(self.field, "upload_to"):
+            if callable(self.field.upload_to):
+                return self.field.upload_to(None, self.filename)
+            return self.field.upload_to
+        raise ValueError("Field does not define a valid upload_to attribute.")
 
     @property
     def chunk_exists(self) -> bool:
         """
         Checks if the requested chunk exists.
         """
-        return self.chunk_storage.exists(self.current_chunk_name) and self.chunk_storage.size(
-            self.current_chunk_name
-        ) == int(self.params.get("resumableCurrentChunkSize", "0"))
+        return self.chunk_storage.exists(self.current_chunk_name) and \
+               self.chunk_storage.size(self.current_chunk_name) == int(self.params.get("resumableCurrentChunkSize", "0"))
 
     @property
     def chunk_names(self) -> List[str]:
@@ -111,9 +114,10 @@ class ResumableFile:
         """
         Saves chunk to chunk storage.
         """
+        uploaded_file = UploadedFile(file=file)
         if self.chunk_storage.exists(self.current_chunk_name):
             self.chunk_storage.delete(self.current_chunk_name)
-        self.chunk_storage.save(self.current_chunk_name, file)
+        self.chunk_storage.save(self.current_chunk_name, uploaded_file)
 
     @property
     def size(self) -> int:
@@ -127,6 +131,12 @@ class ResumableFile:
         Collects and saves the file to persistent storage.
         """
         with self.file as merged_file:
-            actual_filename = self.persistent_storage.save(self.storage_filename, File(merged_file))
+            uploaded_file = UploadedFile(
+                file=merged_file,
+                name=self.filename,
+                content_type=self.params.get("resumableType", "application/octet-stream"),
+                size=self.size,
+            )
+            actual_filename = self.persistent_storage.save(self.storage_filename, uploaded_file)
         self.delete_chunks()
         return actual_filename
