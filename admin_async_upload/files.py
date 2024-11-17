@@ -25,7 +25,7 @@ class ResumableFile:
 
         self.chunk_storage_name = getattr(settings, "ADMIN_RESUMABLE_CHUNK_STORAGE", "default")
         self.persistent_storage_name = getattr(settings, "ADMIN_RESUMABLE_STORAGE", "default")
-        self.chunks_subdirectory = getattr(settings, "CHUNKS_SUBDIRECTORY", "chunks")
+        self.chunks_subdirectory = getattr(settings, "ADMIN_RESUMABLE_CHUNKS_SUBDIRECTORY", "chunks")
 
         self.chunk_storage = storages[self.chunk_storage_name]
         self.field_storage = storages[self.persistent_storage_name]
