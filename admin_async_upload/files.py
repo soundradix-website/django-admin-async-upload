@@ -1,146 +1,142 @@
-# -*- coding: utf-8 -*-
-import os.path
 import fnmatch
 import tempfile
+from typing import Any, Dict, Generator, List
 
-from django.conf import settings
+from django.core.files import File
 from django.core.files.uploadedfile import UploadedFile
-from django.core.files.storage import default_storage
-from django.utils.module_loading import import_string
+from django.core.files.storage import Storage
+from django.utils.functional import cached_property
+
+from admin_async_upload.storage import ResumableStorage
 
 
-class ResumableFile(object):
+class ResumableFile:
     """
-    Handles file saving and processing.
-    It must only have access to chunk storage where it saves file chunks.
-    When all chunks are uploaded it collects and merges them returning temporary file pointer
-    that can be used to save the complete file to persistent storage.
-
-    Chunk storage should preferably be some local storage to avoid traffic
-    as files usually must be downloaded to server as chunks and re-uploaded as complete files.
+    Handles file saving and processing for resumable uploads.
     """
 
-    def __init__(self, field, user, params):
-        self.field = field
-        self.user = user
+    def __init__(self, field: Any, user: Any, params: Dict[str, str]) -> None:
+        self.field = field  # A Django FileField or similar
+        self.user = user  # Typically a User instance
         self.params = params
         self.chunk_suffix = "_part_"
-        chunk_storage_class = getattr(settings, 'ADMIN_RESUMABLE_CHUNK_STORAGE', None)
-        if chunk_storage_class is None:
-            self.chunk_storage = self.field.storage or default_storage
-        else:
-            self.chunk_storage = import_string(chunk_storage_class)()
-        self.field_storage = self.field.storage or default_storage
+
+    @cached_property
+    def resumable_storage(self) -> ResumableStorage:
+        return ResumableStorage()
+
+    @cached_property
+    def persistent_storage(self) -> Storage:
+        return self.resumable_storage.get_persistent_storage()
+
+    @cached_property
+    def chunk_storage(self) -> Storage:
+        return self.resumable_storage.get_chunk_storage()
 
     @property
-    def storage_filename(self):
-        if isinstance(self.field.upload_to, str):
-            return self.field_storage.generate_filename(os.path.join(self.field.upload_to, self.filename))
-        else:
-            # Note that there isn't really any way to have a valid instance
-            # here so the upload file naming should not rely on it.
-            unique_name = self.field.upload_to(None, self.filename)
-            return self.field_storage.generate_filename(unique_name)
+    def storage_filename(self) -> str:
+        return self.resumable_storage.full_filename(self.filename, self.upload_to)
 
     @property
-    def chunk_exists(self):
+    def upload_to(self) -> str:
+        if hasattr(self.field, "upload_to"):
+            if callable(self.field.upload_to):
+                return self.field.upload_to(None, self.filename)
+            return self.field.upload_to
+        raise ValueError("Field does not define a valid upload_to attribute.")
+
+    @property
+    def chunk_exists(self) -> bool:
         """
         Checks if the requested chunk exists.
         """
         return self.chunk_storage.exists(self.current_chunk_name) and \
-               self.chunk_storage.size(self.current_chunk_name) == int(self.params.get('resumableCurrentChunkSize', 0))
+               self.chunk_storage.size(self.current_chunk_name) == int(self.params.get("resumableCurrentChunkSize", "0"))
 
     @property
-    def chunk_names(self):
+    def chunk_names(self) -> List[str]:
         """
         Iterates over all stored chunks.
         """
-        chunks = []
-        files = sorted(self.chunk_storage.listdir('')[1])
-        for file in files:
-            if fnmatch.fnmatch(file, '%s%s*' % (self.filename,
-                                                self.chunk_suffix)):
-                chunks.append(file)
-        return chunks
+        files = sorted(self.chunk_storage.listdir("")[1])
+        return [file for file in files if fnmatch.fnmatch(file, f"{self.filename}{self.chunk_suffix}*")]
 
     @property
-    def current_chunk_name(self):
-        # TODO: add user identifier to chunk name
-        return "%s%s%s" % (
-            self.filename,
-            self.chunk_suffix,
-            self.params.get('resumableChunkNumber').zfill(4)
-        )
+    def current_chunk_name(self) -> str:
+        return f"{self.filename}{self.chunk_suffix}{str(self.params.get('resumableChunkNumber', '0')).zfill(4)}"
 
-    def chunks(self):
+    def chunks(self) -> Generator[bytes, None, None]:
         """
         Iterates over all stored chunks.
         """
-        # TODO: add user identifier to chunk name
-        files = sorted(self.chunk_storage.listdir('')[1])
-        for file in files:
-            if fnmatch.fnmatch(file, '%s%s*' % (self.filename,
-                                                self.chunk_suffix)):
-                yield self.chunk_storage.open(file, 'rb').read()
+        for chunk_name in self.chunk_names:
+            with self.chunk_storage.open(chunk_name, "rb") as chunk_file:
+                yield chunk_file.read()
 
-    def delete_chunks(self):
-        [self.chunk_storage.delete(chunk) for chunk in self.chunk_names]
+    def delete_chunks(self) -> None:
+        """
+        Deletes all stored chunks.
+        """
+        for chunk in self.chunk_names:
+            self.chunk_storage.delete(chunk)
 
     @property
-    def file(self):
+    def file(self) -> tempfile.NamedTemporaryFile:
         """
         Merges file and returns its file pointer.
         """
         if not self.is_complete:
-            raise Exception('Chunk(s) still missing')
+            raise Exception("Chunk(s) still missing")
         outfile = tempfile.NamedTemporaryFile("w+b")
-        for chunk in self.chunk_names:
-            outfile.write(self.chunk_storage.open(chunk).read())
+        for chunk in self.chunks():
+            outfile.write(chunk)
+        outfile.seek(0)  # Reset the file pointer
         return outfile
 
     @property
-    def filename(self):
+    def filename(self) -> str:
         """
         Gets the filename.
         """
-        # TODO: add user identifier to chunk name
-        filename = self.params.get('resumableFilename')
-        if '/' in filename:
-            raise Exception('Invalid filename')
-        value = "%s_%s" % (self.params.get('resumableTotalSize'), filename)
-        return value
+        filename = self.params.get("resumableFilename", "")
+        if "/" in filename:
+            raise Exception("Invalid filename")
+        return f"{self.params.get('resumableTotalSize', '0')}_{filename}"
 
     @property
-    def is_complete(self):
+    def is_complete(self) -> bool:
         """
         Checks if all chunks are already stored.
         """
-        return int(self.params.get('resumableTotalSize')) == self.size
+        return int(self.params.get("resumableTotalSize", "0")) == self.size
 
-    def process_chunk(self, file):
+    def process_chunk(self, file: File) -> None:
         """
         Saves chunk to chunk storage.
         """
+        uploaded_file = UploadedFile(file=file)
         if self.chunk_storage.exists(self.current_chunk_name):
             self.chunk_storage.delete(self.current_chunk_name)
-        self.chunk_storage.save(self.current_chunk_name, file)
+        self.chunk_storage.save(self.current_chunk_name, uploaded_file)
 
     @property
-    def size(self):
+    def size(self) -> int:
         """
         Gets size of all chunks combined.
         """
-        size = 0
-        for chunk in self.chunk_names:
-            size += self.chunk_storage.size(chunk)
-        return size
+        return sum(self.chunk_storage.size(chunk) for chunk in self.chunk_names)
 
-    def collect(self):
-        file_data = UploadedFile(
-            self.file,
-            name=self.params.get('resumableFilename'),
-            content_type=self.params.get('resumableType', 'text/plain'),
-            size=self.params.get('resumableTotalSize', 0))
-        actual_filename = self.field_storage.save(self.storage_filename, file_data)
+    def collect(self) -> str:
+        """
+        Collects and saves the file to persistent storage.
+        """
+        with self.file as merged_file:
+            uploaded_file = UploadedFile(
+                file=merged_file,
+                name=self.filename,
+                content_type=self.params.get("resumableType", "application/octet-stream"),
+                size=self.size,
+            )
+            actual_filename = self.persistent_storage.save(self.storage_filename, uploaded_file)
         self.delete_chunks()
         return actual_filename
