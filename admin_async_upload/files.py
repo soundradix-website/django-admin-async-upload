@@ -6,7 +6,6 @@ import tempfile
 from django.conf import settings
 from django.core.files.storage import storages
 from django.core.files.uploadedfile import UploadedFile
-from django.utils.encoding import force_str
 
 
 class ResumableFile:
@@ -126,9 +125,7 @@ class ResumableFile:
         filename = os.path.basename(filename)
         if not filename:
             raise Exception("Invalid filename")
-        total_size = self.params.get("resumableTotalSize", "0")
-        value = f"{total_size}_{filename}"
-        return value
+        return filename
 
     @property
     def is_complete(self):
